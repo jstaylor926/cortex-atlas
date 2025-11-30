@@ -1,0 +1,75 @@
+{
+  "name": "atlas-desktop",
+  "version": "1.0.0",
+  "description": "Atlas - Local-first personal OS",
+  "keywords": [
+    "atlas",
+    "productivity",
+    "notes",
+    "tasks",
+    "local-first"
+  ],
+  "license": "MIT",
+  "author": "",
+  "type": "commonjs",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev:renderer": "cd renderer && npm run dev",
+    "dev:electron": "wait-on http://localhost:5173 && npm run build:electron && electron .",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build:renderer": "cd renderer && npm run build",
+    "build": "npm run build:renderer && npm run build:electron",
+    "package": "electron-builder",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "package:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "typescript": "^5.3.3",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.atlas.desktop",
+    "productName": "Atlas",
+    "directories": {
+      "output": "dist-package"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!venv",
+          "!__pycache__",
+          "!*.pyc"
+        ]
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  }
+}

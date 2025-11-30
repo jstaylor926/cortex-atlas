@@ -1,0 +1,67 @@
+
+• Implementation Strategy
+
+  - Foundations & Repo Layout
+      - Adopt proposed mono layout: backend/ (FastAPI, SQLite), app/electron/ (main, preload), app/renderer/ (React/TS).
+      - Add shared configs: .env.local for OpenAI key/ports, make dev script to run backend + renderer + Electron in dev,
+        pyproject + package.json scaffolds.
+      - Define ports/paths up front: FastAPI on 127.0.0.1:4100, renderer dev server on 5173, Electron preload export namespace
+        window.atlas.
+  - Backend (FastAPI) MVP
+      - Create Pydantic models from technical_design.md JSON shapes; wire routers per technical_design.md API section (/
+        notes, /tasks, /events, /projects, /conversations, /ai, /settings, /dashboard).
+      - Implement core CRUD + derived fields:
+          - Notes: FTS search, backlinks derivation, task extraction stub.
+          - Tasks: filters (status/overdue/due_today), project linkage.
+          - Events: local CRUD + link tables, ready for Google sync later.
+          - Projects: basic CRUD and summary.
+          - Conversations/messages: persistence + streaming placeholder (SSE/WS).
+          - Settings: single-row JSON store.
+      - Add /health endpoint for Electron startup gating; seed/migrate SQLite (schema from technical_design.md).
+      - AI placeholders calling OpenAI: daily briefing, note summarize, task extract, semantic search, dev assist; encapsulate
+        OpenAI client for swap-out.
+  - Electron Main/Preload
+      - Main responsibilities (from electron_design.md): spawn/monitor FastAPI (backendProcess.ts), BrowserWindow creation with
+        contextIsolation, health check gate, graceful shutdown.
+      - IPC surface via preload (window.atlas): project folder picker, dev.readDir/readFile/writeFile, terminal start/send/
+        onData/stop. Keep surface minimal and path-scoped to selected root_path.
+      - Terminal manager: pseudo-terminal per project root; stream output events to renderer.
+  - Renderer (React/TS)
+      - Routing skeleton: Dashboard, Notes, Tasks, Calendar, Dev Workspace, Settings; right-side Chat panel; shared Sidebar
+        + TopBar.
+      - API client module pointing to FastAPI; hooks for queries/mutations; streaming hook for chat if using SSE/WS.
+      - Screens:
+          - Dashboard: pulls /dashboard/today; button triggers /ai/daily-briefing.
+          - Notes: list + editor (Markdown/preview), wiki-link parsing, backlinks pane, “extract tasks” action.
+          - Tasks: filters (all/overdue/due_today/status), CRUD, link to note/project.
+          - Calendar: month/week/day, local CRUD via /events, link/unlink notes/tasks; placeholder for Google sync call.
+          - Dev Workspace: project list (create via folder picker + /projects), file tree (window.atlas.dev.readDir), editor
+            tabs (autosave via writeFile), terminal pane (window.atlas.terminal.*), AI actions call /ai/dev/assist.
+          - Settings: AI models, calendar selection, dev defaults, theme toggles via /settings.
+      - Chat panel: conversations list, message thread, send → /conversations/{id}/messages (stream or poll), render
+        references.
+  - AI & Embeddings
+      - Implement embedding generation pipeline for notes (chunk, store in embeddings); optional tasks.
+      - Retrieval helper used by chat/daily-briefing/search; rank + cite references.
+      - Guardrails: token limits, model config from settings; cite sources in responses.
+  - Sync & Integrations
+      - Google Calendar flow stubbed: auth-url + callback + /calendar/google/sync; store tokens in sync_state. UI shows
+        connection status and selectable calendars.
+      - Later enhancement: allow external backend connection instead of auto-spawn.
+  - Testing & Tooling
+      - Backend: unit tests for routers/models, task extraction parser, embedding pipeline; integration test hitting SQLite.
+      - Frontend: component tests for Note editor/task list; e2e smoke with Playwright for main flows (notes/tasks/dev
+        workspace/terminal).
+      - Add lint/format (ruff, black, eslint, prettier), type checks (mypy, tsc).
+  - Build & Packaging
+      - Dev scripts: make dev (FastAPI + Vite + Electron), make backend (uvicorn), make ui (Vite dev server).
+      - Prod: package renderer (Vite build), bundle Electron; ship Python via venv/installer or require system Python v1;
+        Electron main spawns python uvicorn_entry.py.
+      - Startup health error screen if backend fails; logs surfaced in a modal.
+  - Milestones (suggested order)
+      1. Repo scaffolding + health check; FastAPI CRUD for notes/tasks/events/projects/settings.
+      2. Electron main/preload with backend spawn + basic IPC for file/dir + terminal.
+      3. Renderer shell (nav/layout/chat), Notes/Tasks/Calendar screens wired to API.
+      4. Dev Workspace file tree/editor/terminal integration.
+      5. AI endpoints + retrieval + UI hooks (briefing, note summarize, dev assist).
+      6. Google Calendar sync stub + settings polish; tests and packaging.
