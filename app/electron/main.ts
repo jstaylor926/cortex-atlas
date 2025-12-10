@@ -9,6 +9,8 @@ import { registerIpcHandlers } from './ipcHandlers';
 let mainWindow: BrowserWindow | null = null;
 
 async function createWindow() {
+  console.log('Current NODE_ENV:', process.env.NODE_ENV);
+
   // Start FastAPI backend
   console.log('Starting backend...');
   await startBackend();

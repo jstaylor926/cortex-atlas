@@ -7,16 +7,32 @@ import * as path from 'path';
 let backendProcess: ChildProcess | null = null;
 
 export async function startBackend(): Promise<void> {
-  const pythonPath = 'python3'; // Or bundled Python path in production
+  // Check if backend is already running
+  try {
+    const response = await fetch('http://127.0.0.1:4100/health');
+    if (response.ok) {
+      console.log('Backend already running, skipping spawn');
+      return;
+    }
+  } catch (e) {
+    // Backend not running, proceed to spawn
+  }
+
   const isDev = process.env.NODE_ENV === 'development';
 
-  // In development, use the backend from parent directory
-  // In production, use bundled backend
+  // In development, use the backend from parent directory and venv python
+  // In production, use bundled backend and system/bundled python
   const backendDir = isDev
     ? path.join(__dirname, '../../backend')
     : path.join(process.resourcesPath, 'backend');
 
+  const pythonPath = isDev
+    ? path.join(backendDir, 'venv/bin/python')
+    : 'python3'; // Or bundled Python path in production
+
   const scriptPath = path.join(backendDir, 'uvicorn_entry.py');
+
+  console.log(`Spawning backend: ${pythonPath} ${scriptPath}`);
 
   backendProcess = spawn(pythonPath, [scriptPath, '--port', '4100'], {
     cwd: backendDir,

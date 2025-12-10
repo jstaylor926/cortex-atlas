@@ -49,21 +49,21 @@
 ## 🚧 Phase 2: Core Data Features (IN PROGRESS)
 
 ### Backend Services
-- [ ] Implement wiki-links parser
-- [ ] Implement backlinks computation
-- [ ] Task extraction from markdown
-- [ ] Full-text search (SQLite FTS)
-- [ ] Settings router implementation
-- [ ] Dashboard aggregation endpoint
+- [x] Implement wiki-links parser
+- [x] Implement backlinks computation
+- [x] Task extraction from markdown
+- [x] Full-text search (SQLite FTS)
+- [x] Settings router implementation
+- [x] Dashboard aggregation endpoint
 
 ### Database Operations
-- [ ] Add database migration system (Alembic)
+- [x] Add database migration system (Alembic)
 - [ ] Seed data for development
 - [ ] Database backup utilities
 - [ ] Data export/import
 
 ### Testing
-- [ ] Backend unit tests (pytest)
+- [x] Backend unit tests (pytest)
 - [ ] API integration tests
 - [ ] Database test fixtures
 
@@ -318,8 +318,8 @@
 
 ### Current Status
 - **Phase 1**: 100% complete
-- **Phase 2**: 0% complete
-- **Overall Progress**: ~15% of total v1 scope
+- **Phase 2**: ~60% complete (Backend Services & DB Operations done)
+- **Overall Progress**: ~25% of total v1 scope
 
 ### Critical Path
 The fastest path to a working prototype:
@@ -340,4 +340,5 @@ The fastest path to a working prototype:
 
 - **2025-11-29**: Initial roadmap created
 - **2025-11-29**: Phase 1 marked complete
+- **2025-12-04**: Phase 2 Backend Services & Testing marked complete
 

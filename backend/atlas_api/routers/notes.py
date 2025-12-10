@@ -14,14 +14,12 @@ import sqlite3
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 
-def extract_wiki_links(content: str) -> List[str]:
-    """Extract [[Note Title]] style links"""
-    pattern = r'\[\[([^\]]+)\]\]'
-    return re.findall(pattern, content)
+from ..utils.wiki_links import parse_wiki_links
+from ..utils.task_extraction import extract_tasks_from_markdown
 
 
 def get_backlinks(note_id: str, conn: sqlite3.Connection) -> List[Backlink]:
-    """Find all notes that link to this note"""
+    """Find all notes that link to this note via the note_links table"""
     cursor = conn.cursor()
 
     # Get the title of the target note
@@ -34,19 +32,25 @@ def get_backlinks(note_id: str, conn: sqlite3.Connection) -> List[Backlink]:
 
     target_title = target['title']
 
-    # Get all other notes
-    all_notes = cursor.execute(
-        "SELECT id, title, content FROM notes WHERE id != ?", (note_id,)
-    ).fetchall()
+    # Query the note_links table to find notes that link to target_title
+    # Then join with the notes table to get the source note details
+    query = """
+        SELECT
+            n.id AS note_id,
+            n.title AS title
+        FROM note_links nl
+        JOIN notes n ON nl.source_note_id = n.id
+        WHERE nl.target_note_title = ?
+          AND nl.source_note_id != ?  -- Exclude the note itself
+    """
+    rows = cursor.execute(query, (target_title, note_id,)).fetchall()
 
     backlinks = []
-    for note in all_notes:
-        links = extract_wiki_links(note['content'])
-        if target_title in links:
-            backlinks.append(Backlink(
-                note_id=note['id'],
-                title=note['title']
-            ))
+    for row in rows:
+        backlinks.append(Backlink(
+            note_id=row['note_id'],
+            title=row['title']
+        ))
 
     return backlinks
 
@@ -63,16 +67,23 @@ async def list_notes(
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    query = "SELECT * FROM notes WHERE 1=1"
+    query = "SELECT n.* FROM notes n"
     params = []
+    where_clauses = ["1=1"]
 
     if q:
-        query += " AND (title LIKE ? OR content LIKE ?)"
-        params.extend([f"%{q}%", f"%{q}%"])
-
+        query = "SELECT n.* FROM notes n JOIN notes_fts nft ON n.rowid = nft.rowid WHERE nft MATCH ?"
+        params.append(q)
+    
     if tag:
-        query += " AND tags LIKE ?"
+        where_clauses.append("n.tags LIKE ?")
         params.append(f'%"{tag}"%')
+
+    if len(where_clauses) > 1: # If there are additional filters beyond FTS or if FTS isn't used
+        if q: # if q is used, add additional filters to WHERE clause
+            query += " AND " + " AND ".join(where_clauses[1:]) 
+        else: # if q is not used, define the WHERE clause
+            query += " WHERE " + " AND ".join(where_clauses)
 
     # Sorting
     if sort == "updated_desc":
@@ -94,9 +105,13 @@ async def list_notes(
     for row in rows:
         note_dict = dict(row)
         note_dict['tags'] = json.loads(note_dict.get('tags') or '[]')
-        note_dict['links'] = extract_wiki_links(note_dict['content'])
+        note_dict['links'] = parse_wiki_links(note_dict['content'])
         note_dict['backlinks'] = []
-        note_dict['task_count'] = None
+        extracted_tasks = extract_tasks_from_markdown(note_dict['content'])
+        total_tasks = len(extracted_tasks)
+        open_tasks = sum(1 for task in extracted_tasks if task['status'] == 'todo')
+        done_tasks = total_tasks - open_tasks
+        note_dict['task_count'] = NoteTaskCount(total=total_tasks, open=open_tasks, done=done_tasks)
         notes.append(note_dict)
 
     return {"notes": notes, "total": len(notes), "limit": limit, "offset": offset}
@@ -123,11 +138,27 @@ async def create_note(note: NoteCreate):
             json.dumps(note.tags),
             now,
             now
-        )
+        ) # Missing parenthesis added here
     )
 
+    # Extract wiki-links and insert into note_links table
+    extracted_links = parse_wiki_links(note.content)
+    for link_target in extracted_links:
+        cursor.execute(
+            """
+            INSERT INTO note_links (source_note_id, target_note_title)
+            VALUES (?, ?)
+            """,
+            (note_id, link_target)
+        )
     conn.commit()
     conn.close()
+
+    extracted_tasks = extract_tasks_from_markdown(note.content)
+    total_tasks = len(extracted_tasks)
+    open_tasks = sum(1 for task in extracted_tasks if task['status'] == 'todo')
+    done_tasks = total_tasks - open_tasks
+    task_count = NoteTaskCount(total=total_tasks, open=open_tasks, done=done_tasks)
 
     return {
         "id": note_id,
@@ -136,9 +167,9 @@ async def create_note(note: NoteCreate):
         "tags": note.tags,
         "created_at": now,
         "updated_at": now,
-        "links": extract_wiki_links(note.content),
+        "links": parse_wiki_links(note.content),
         "backlinks": [],
-        "task_count": None
+        "task_count": task_count
     }
 
 
@@ -158,9 +189,14 @@ async def get_note(note_id: str):
 
     note_dict = dict(row)
     note_dict['tags'] = json.loads(note_dict.get('tags') or '[]')
-    note_dict['links'] = extract_wiki_links(note_dict['content'])
+    note_dict['links'] = parse_wiki_links(note_dict['content'])
     note_dict['backlinks'] = [bl.dict() for bl in get_backlinks(note_id, conn)]
-    note_dict['task_count'] = None
+    
+    extracted_tasks = extract_tasks_from_markdown(note_dict['content'])
+    total_tasks = len(extracted_tasks)
+    open_tasks = sum(1 for task in extracted_tasks if task['status'] == 'todo')
+    done_tasks = total_tasks - open_tasks
+    note_dict['task_count'] = NoteTaskCount(total=total_tasks, open=open_tasks, done=done_tasks)
 
     conn.close()
     return note_dict
@@ -200,6 +236,10 @@ async def update_note(note_id: str, update: NoteUpdate):
     if not updates:
         conn.close()
         return dict(existing)
+        
+    # If content is updated, clear existing links from note_links table
+    if update.content is not None:
+        cursor.execute("DELETE FROM note_links WHERE source_note_id = ?", (note_id,))
 
     updates.append("updated_at = ?")
     params.append(datetime.now().isoformat())
@@ -209,6 +249,24 @@ async def update_note(note_id: str, update: NoteUpdate):
     cursor.execute(query, params)
     conn.commit()
 
+    # Fetch updated note to get its content (potentially new content)
+    updated = cursor.execute(
+        "SELECT * FROM notes WHERE id = ?", (note_id,)
+    ).fetchone()
+    
+    # If content was updated, re-extract links and insert into note_links table
+    if update.content is not None: # Re-evaluate links if content changed
+        new_links = parse_wiki_links(updated['content'])
+        for link_target in new_links:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO note_links (source_note_id, target_note_title)
+                VALUES (?, ?)
+                """,
+                (note_id, link_target)
+            )
+        conn.commit()
+
     # Fetch updated note
     updated = cursor.execute(
         "SELECT * FROM notes WHERE id = ?", (note_id,)
@@ -216,9 +274,13 @@ async def update_note(note_id: str, update: NoteUpdate):
 
     note_dict = dict(updated)
     note_dict['tags'] = json.loads(note_dict.get('tags') or '[]')
-    note_dict['links'] = extract_wiki_links(note_dict['content'])
+    note_dict['links'] = parse_wiki_links(note_dict['content'])
     note_dict['backlinks'] = [bl.dict() for bl in get_backlinks(note_id, conn)]
-    note_dict['task_count'] = None
+    extracted_tasks = extract_tasks_from_markdown(note_dict['content'])
+    total_tasks = len(extracted_tasks)
+    open_tasks = sum(1 for task in extracted_tasks if task['status'] == 'todo')
+    done_tasks = total_tasks - open_tasks
+    note_dict['task_count'] = NoteTaskCount(total=total_tasks, open=open_tasks, done=done_tasks)
 
     conn.close()
     return note_dict
